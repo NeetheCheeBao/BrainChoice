@@ -18,7 +18,7 @@
 
 ### 一键编译
 
-```bat
+```bash
 .\build.bat
 ```
 
@@ -34,6 +34,16 @@ bin\BrainChoice.exe
 | `bin\BrainChoice.exe` | 产品文件 |
 | `%TEMP%\BrainChoice_build\` | 临时构建文件 |
 
-## 许可证
+### 源码下载
+
+```bash
+git clone https://github.com/NeetheCheeBao/BrainChoice.git
+```
+
+### 发行版下载
+
+前往[releases](https://github.com/NeetheCheeBao/BrainChoice/releases)页面下载
+
+### 许可证
 
 [PolyForm Noncommercial License 1.0.0](LICENSE) 
