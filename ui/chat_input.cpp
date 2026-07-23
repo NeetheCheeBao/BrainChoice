@@ -1,6 +1,7 @@
 #include "ui/chat_input.hpp"
 #include <string>
 #include <imm.h>
+#include <shellapi.h>
 
 static ChatInput* gChat = nullptr;
 
@@ -9,6 +10,8 @@ static constexpr int kMarginBot = 28;
 static constexpr int kBarH      = 46;
 static constexpr int kPad       = 8;
 static constexpr BYTE kAlpha    = 210;
+static constexpr int kMaxInputChars = 8192;
+static constexpr size_t kMaxClipboardScan = 65536;
 
 bool ChatInput::createPanel() {
     HINSTANCE inst = (HINSTANCE)GetWindowLongPtrA(parent_, GWLP_HINSTANCE);
@@ -74,7 +77,9 @@ bool ChatInput::createPanel() {
         L"MS Shell Dlg 2");
     if (font_) SendMessageW(edit_, WM_SETFONT, (WPARAM)font_, TRUE);
 
-    SendMessageW(edit_, EM_LIMITTEXT, (WPARAM)1000000, 0);
+    SendMessageW(edit_, EM_LIMITTEXT, (WPARAM)kMaxInputChars, 0);
+    DragAcceptFiles(edit_, FALSE);
+    DragAcceptFiles(panel_, FALSE);
 
     oldEditProc_ = (WNDPROC)SetWindowLongPtrW(edit_, GWLP_WNDPROC, (LONG_PTR)editHook);
     ImmAssociateContext(edit_, nullptr);
@@ -185,10 +190,13 @@ void ChatInput::sendAndClose() {
     }
 
     std::string text;
-    text.reserve(wtext.size());
+    text.reserve(wtext.size() < (size_t)kMaxInputChars ? wtext.size() : (size_t)kMaxInputChars);
     for (wchar_t ch : wtext) {
-        if (ch >= 0x20 && ch <= 0x7E)
+        if (ch >= 0x20 && ch <= 0x7E) {
             text.push_back((char)ch);
+            if ((int)text.size() >= kMaxInputChars)
+                break;
+        }
     }
 
     SetWindowTextW(edit_, L"");
@@ -242,6 +250,8 @@ LRESULT CALLBACK ChatInput::panelProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)cs->lpCreateParams);
         return 0;
     }
+    case WM_DROPFILES:
+        return 0;
     case WM_ERASEBKGND:
         return 1;
     case WM_PAINT: {
@@ -281,32 +291,65 @@ static bool isAsciiPrintable(wchar_t ch) {
     return ch >= 0x20 && ch <= 0x7E;
 }
 
-static std::wstring filterAsciiOnly(const std::wstring& in) {
-    std::wstring out;
-    out.reserve(in.size());
-    for (wchar_t ch : in)
-        if (isAsciiPrintable(ch)) out.push_back(ch);
-    return out;
-}
-
 static void pasteAsciiOnly(HWND edit) {
+    if (!edit) return;
+
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT))
+        return;
+
     if (!OpenClipboard(edit)) return;
+
     HANDLE h = GetClipboardData(CF_UNICODETEXT);
-    if (h) {
-        const wchar_t* p = (const wchar_t*)GlobalLock(h);
-        if (p) {
-            std::wstring filtered = filterAsciiOnly(p);
-            GlobalUnlock(h);
-            if (!filtered.empty())
-                SendMessageW(edit, EM_REPLACESEL, TRUE, (LPARAM)filtered.c_str());
+    if (!h) {
+        CloseClipboard();
+        return;
+    }
+
+    const SIZE_T rawBytes = GlobalSize(h);
+    if (rawBytes < sizeof(wchar_t)) {
+        CloseClipboard();
+        return;
+    }
+
+    const wchar_t* p = (const wchar_t*)GlobalLock(h);
+    if (!p) {
+        CloseClipboard();
+        return;
+    }
+
+    const int curLen = GetWindowTextLengthW(edit);
+    int room = kMaxInputChars - curLen;
+    if (room < 0) room = 0;
+
+    std::wstring filtered;
+    if (room > 0) {
+        const size_t maxUnits = rawBytes / sizeof(wchar_t);
+        size_t scanLimit = maxUnits;
+        if (scanLimit > kMaxClipboardScan)
+            scanLimit = kMaxClipboardScan;
+
+        filtered.reserve((size_t)(room < 256 ? room : 256));
+        for (size_t i = 0; i < scanLimit && (int)filtered.size() < room; ++i) {
+            const wchar_t ch = p[i];
+            if (ch == L'\0') break;
+            if (isAsciiPrintable(ch))
+                filtered.push_back(ch);
         }
     }
+
+    GlobalUnlock(h);
     CloseClipboard();
+
+    if (!filtered.empty())
+        SendMessageW(edit, EM_REPLACESEL, TRUE, (LPARAM)filtered.c_str());
 }
 
 LRESULT CALLBACK ChatInput::editHook(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     ChatInput* self = gChat;
     WNDPROC prev = (self && self->oldEditProc_) ? self->oldEditProc_ : DefWindowProcW;
+
+    if (msg == WM_DROPFILES)
+        return 0;
 
     if (msg == WM_CHAR) {
         const wchar_t ch = (wchar_t)wp;
@@ -323,7 +366,13 @@ LRESULT CALLBACK ChatInput::editHook(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 
     if (self && self->open_) {
         if (msg == WM_KEYDOWN) {
-            if (wp == 'V' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+            const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if ((wp == 'V' || wp == 'v') && ctrl) {
+                pasteAsciiOnly(hwnd);
+                return 0;
+            }
+            if (wp == VK_INSERT && shift) {
                 pasteAsciiOnly(hwnd);
                 return 0;
             }
@@ -345,6 +394,9 @@ LRESULT CALLBACK ChatInput::editHook(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         if (msg == WM_PASTE) {
             pasteAsciiOnly(hwnd);
             return 0;
+        }
+        if (msg == WM_CLEAR || msg == WM_CUT || msg == WM_COPY) {
+            return CallWindowProcW(prev, hwnd, msg, wp, lp);
         }
     }
     return CallWindowProcW(prev, hwnd, msg, wp, lp);

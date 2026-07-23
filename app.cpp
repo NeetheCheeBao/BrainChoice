@@ -214,8 +214,8 @@ void App::onChatSend(const std::string& text) {
     }
 
     const size_t n = calcText_.size();
-    if (n > 1000000) {
-        calcText_.resize(1000000);
+    if (n > 8192) {
+        calcText_.resize(8192);
     }
     const size_t nn = calcText_.size();
     if (nn > 200000)
