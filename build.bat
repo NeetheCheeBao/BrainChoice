@@ -9,12 +9,16 @@ where "%CXX%" >nul 2>&1
 if errorlevel 1 (
   echo ERROR: g++ not found on PATH.
   echo Install MinGW-w64 and add its bin folder to PATH, or set CXX=...
+  echo.
+  pause
   exit /b 1
 )
 where "%WR%" >nul 2>&1
 if errorlevel 1 (
   echo ERROR: windres not found on PATH.
   echo Install MinGW-w64 and add its bin folder to PATH, or set WR=...
+  echo.
+  pause
   exit /b 1
 )
 
