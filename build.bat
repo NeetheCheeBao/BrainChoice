@@ -61,7 +61,7 @@ call :progress "link %OUT%"
 if errorlevel 1 goto :fail
 
 echo.
-echo BUILD SUCCESS  -^> %OUT%
+echo BUILD OK  -^> %OUT%
 rmdir /s /q "%OBJDIR%" >nul 2>&1
 call :hold 3
 exit /b 0
