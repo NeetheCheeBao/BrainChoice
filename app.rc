@@ -1,0 +1,22 @@
+#include "resource.h"
+
+IDI_APPICON ICON "assets/ico/BrainChoice.ico"
+IDI_INFO ICON "assets/ico/info.ico"
+IDI_PORTRAIT ICON "assets/ico/portrait.ico"
+IDI_WARN ICON "assets/ico/warn.ico"
+
+IDR_WALK_B_00 RCDATA "assets/alternate/action/B00.png"
+IDR_WALK_B_01 RCDATA "assets/alternate/action/B01.png"
+IDR_WALK_B_02 RCDATA "assets/alternate/action/B02.png"
+IDR_WALK_B_03 RCDATA "assets/alternate/action/B03.png"
+IDR_WALK_B_04 RCDATA "assets/alternate/action/B04.png"
+IDR_WALK_B_05 RCDATA "assets/alternate/action/B05.png"
+
+IDR_WALK_G_00 RCDATA "assets/alternate/action/G00.png"
+IDR_WALK_G_01 RCDATA "assets/alternate/action/G01.png"
+IDR_WALK_G_02 RCDATA "assets/alternate/action/G02.png"
+IDR_WALK_G_03 RCDATA "assets/alternate/action/G03.png"
+IDR_WALK_G_04 RCDATA "assets/alternate/action/G04.png"
+IDR_WALK_G_05 RCDATA "assets/alternate/action/G05.png"
+
+IDR_BGM WAVE "assets/audio/audio.wav"
