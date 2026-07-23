@@ -37,6 +37,10 @@ bin\BrainChoice.exe
 ### 源码下载
 
 ```bash
+gh repo clone NeetheCheeBao/BrainChoice
+```
+
+```bash
 git clone https://github.com/NeetheCheeBao/BrainChoice.git
 ```
 
