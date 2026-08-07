@@ -16,6 +16,16 @@
 - MinGW-w64（或兼容工具链），`g++` 与 `windres` 在 **PATH** 中  
   也可临时指定：`set CXX=...` / `set WR=...`
 
+### 源码下载
+
+```bash
+gh repo clone NeetheCheeBao/BrainChoice
+```
+
+```bash
+git clone https://github.com/NeetheCheeBao/BrainChoice.git
+```
+
 ### 一键编译
 
 ```bash
@@ -33,20 +43,6 @@ bin\BrainChoice.exe
 |------|------|
 | `bin\BrainChoice.exe` | 产品文件 |
 | `%TEMP%\BrainChoice_build\` | 临时构建文件 |
-
-### 源码下载
-
-```bash
-gh repo clone NeetheCheeBao/BrainChoice
-```
-
-```bash
-git clone https://github.com/NeetheCheeBao/BrainChoice.git
-```
-
-### 发行版下载
-
-前往[releases](https://github.com/NeetheCheeBao/BrainChoice/releases)页面下载
 
 ### 许可证
 
