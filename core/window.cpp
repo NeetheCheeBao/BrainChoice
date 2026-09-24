@@ -1,9 +1,58 @@
 #include "core/window.hpp"
 #include "core/gl_loader.hpp"
+#include "core/hdr_compat.hpp"
+#include <cstdint>
+
+#ifndef PFD_SUPPORT_COMPOSITION
+#define PFD_SUPPORT_COMPOSITION 0x00008000
+#endif
+#ifndef PFD_SWAP_COPY
+#define PFD_SWAP_COPY 0x00000400
+#endif
+
+#ifndef WGL_DRAW_TO_WINDOW_ARB
+#define WGL_DRAW_TO_WINDOW_ARB            0x2001
+#define WGL_ACCELERATION_ARB              0x2003
+#define WGL_SWAP_METHOD_ARB               0x2007
+#define WGL_SUPPORT_OPENGL_ARB            0x2010
+#define WGL_DOUBLE_BUFFER_ARB             0x2011
+#define WGL_PIXEL_TYPE_ARB                0x2013
+#define WGL_RED_BITS_ARB                  0x2015
+#define WGL_GREEN_BITS_ARB                0x2017
+#define WGL_BLUE_BITS_ARB                 0x2019
+#define WGL_ALPHA_BITS_ARB                0x201B
+#define WGL_DEPTH_BITS_ARB                0x2022
+#define WGL_STENCIL_BITS_ARB              0x2023
+#define WGL_FULL_ACCELERATION_ARB         0x2027
+#define WGL_SWAP_COPY_ARB                 0x2029
+#define WGL_TYPE_RGBA_ARB                 0x202B
+#define WGL_SAMPLE_BUFFERS_ARB            0x2041
+#define WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB  0x20A9
+#define WGL_TYPE_RGBA_FLOAT_ARB           0x21A0
+#define WGL_COLORSPACE_EXT                0x309D
+#define WGL_COLORSPACE_SRGB_EXT           0x3089
+#endif
+
+typedef BOOL (WINAPI *PFNWGLCHOOSEPIXELFORMATARBPROC)(HDC, const int*, const FLOAT*, UINT, int*, UINT*);
+typedef BOOL (WINAPI *PFNWGLGETPIXELFORMATATTRIBIVARBPROC)(HDC, int, int, UINT, const int*, int*);
+
 static AppWindow* gWin = nullptr;
 
 static constexpr DWORD kWindowStyle =
     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX;
+
+static void* wglProc(const char* name) {
+    void* p = (void*)wglGetProcAddress(name);
+    if (!p || p == (void*)(uintptr_t)1 || p == (void*)(uintptr_t)2 ||
+        p == (void*)(uintptr_t)3 || p == (void*)(uintptr_t)-1)
+        return nullptr;
+    return p;
+}
+
+void applyHdrSafePresent() {
+    if (wglSwapIntervalEXT)
+        wglSwapIntervalEXT(0);
+}
 
 void enforcePortraitSize(int& w, int& h) {
     if (w < 1) w = 1;
@@ -46,6 +95,17 @@ static void clientToWindowSize(DWORD style, int clientW, int clientH, int& outW,
     outH = rc.bottom - rc.top;
 }
 
+static void onDisplayChange() {
+    if (!gWin) return;
+    gWin->displayChanged = true;
+    if (gWin->hdc && gWin->hrc) {
+        wglMakeCurrent(nullptr, nullptr);
+        wglMakeCurrent(gWin->hdc, gWin->hrc);
+        hdrPrepareDc(gWin->hdc);
+    }
+    applyHdrSafePresent();
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CLOSE:
@@ -53,6 +113,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
+        return 0;
+
+    case WM_DISPLAYCHANGE:
+        onDisplayChange();
         return 0;
 
     case WM_GETMINMAXINFO: {
@@ -158,11 +222,197 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
+static void fillSdrPfd(PIXELFORMATDESCRIPTOR& pfd, bool composition, bool swapCopy) {
+    pfd = {};
+    pfd.nSize = sizeof(pfd);
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    if (composition) pfd.dwFlags |= PFD_SUPPORT_COMPOSITION;
+    if (swapCopy) pfd.dwFlags |= PFD_SWAP_COPY;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = 24;
+    pfd.cRedBits = 8;
+    pfd.cGreenBits = 8;
+    pfd.cBlueBits = 8;
+    pfd.cAlphaBits = 8;
+    pfd.cDepthBits = 24;
+    pfd.cStencilBits = 8;
+    pfd.iLayerType = PFD_MAIN_PLANE;
+}
+
+static bool bootstrapWglExts(PFNWGLCHOOSEPIXELFORMATARBPROC& choose,
+                             PFNWGLCREATECONTEXTATTRIBSARBPROC& createCtx,
+                             PFNWGLGETPIXELFORMATATTRIBIVARBPROC& getAttr) {
+    choose = nullptr;
+    createCtx = nullptr;
+    getAttr = nullptr;
+
+    HINSTANCE inst = GetModuleHandleA(nullptr);
+    WNDCLASSA wc = {};
+    wc.style = CS_OWNDC;
+    wc.lpfnWndProc = DefWindowProcA;
+    wc.hInstance = inst;
+    wc.lpszClassName = "BrainChoiceGLDummy";
+    RegisterClassA(&wc);
+
+    HWND hwnd = CreateWindowExA(WS_EX_TOOLWINDOW, "BrainChoiceGLDummy", "",
+                                WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, nullptr);
+    if (!hwnd) {
+        UnregisterClassA("BrainChoiceGLDummy", inst);
+        return false;
+    }
+
+    HDC hdc = GetDC(hwnd);
+    PIXELFORMATDESCRIPTOR pfd;
+    fillSdrPfd(pfd, true, true);
+    int pf = ChoosePixelFormat(hdc, &pfd);
+    if (!pf) {
+        fillSdrPfd(pfd, true, false);
+        pf = ChoosePixelFormat(hdc, &pfd);
+    }
+    if (!pf) {
+        fillSdrPfd(pfd, false, false);
+        pf = ChoosePixelFormat(hdc, &pfd);
+    }
+
+    bool ok = false;
+    HGLRC rc = nullptr;
+    if (pf && SetPixelFormat(hdc, pf, &pfd)) {
+        rc = wglCreateContext(hdc);
+        if (rc && wglMakeCurrent(hdc, rc)) {
+            choose = (PFNWGLCHOOSEPIXELFORMATARBPROC)wglProc("wglChoosePixelFormatARB");
+            createCtx = (PFNWGLCREATECONTEXTATTRIBSARBPROC)wglProc("wglCreateContextAttribsARB");
+            getAttr = (PFNWGLGETPIXELFORMATATTRIBIVARBPROC)wglProc("wglGetPixelFormatAttribivARB");
+            ok = choose != nullptr;
+            wglMakeCurrent(nullptr, nullptr);
+        }
+    }
+    if (rc) wglDeleteContext(rc);
+    if (hdc) ReleaseDC(hwnd, hdc);
+    DestroyWindow(hwnd);
+    UnregisterClassA("BrainChoiceGLDummy", inst);
+    return ok;
+}
+
+static bool formatIsSdr8(HDC hdc, int pf, PFNWGLGETPIXELFORMATATTRIBIVARBPROC getAttr) {
+    if (!getAttr || pf <= 0) return true;
+    const int keys[] = { WGL_RED_BITS_ARB, WGL_PIXEL_TYPE_ARB, WGL_ALPHA_BITS_ARB };
+    int vals[3] = { 0, 0, 0 };
+    if (!getAttr(hdc, pf, 0, 3, keys, vals))
+        return true;
+    if (vals[0] > 8) return false;
+    if (vals[2] > 8) return false;
+    if (vals[1] == (int)WGL_TYPE_RGBA_FLOAT_ARB) return false;
+    return true;
+}
+
+static int chooseSdrFormatArb(HDC hdc,
+                              PFNWGLCHOOSEPIXELFORMATARBPROC choose,
+                              PFNWGLGETPIXELFORMATATTRIBIVARBPROC getAttr) {
+    static const int kList0[] = {
+        WGL_DRAW_TO_WINDOW_ARB, 1,
+        WGL_SUPPORT_OPENGL_ARB, 1,
+        WGL_DOUBLE_BUFFER_ARB, 1,
+        WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
+        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+        WGL_RED_BITS_ARB, 8,
+        WGL_GREEN_BITS_ARB, 8,
+        WGL_BLUE_BITS_ARB, 8,
+        WGL_ALPHA_BITS_ARB, 8,
+        WGL_DEPTH_BITS_ARB, 24,
+        WGL_STENCIL_BITS_ARB, 8,
+        WGL_SAMPLE_BUFFERS_ARB, 0,
+        WGL_SWAP_METHOD_ARB, WGL_SWAP_COPY_ARB,
+        WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, 1,
+        WGL_COLORSPACE_EXT, WGL_COLORSPACE_SRGB_EXT,
+        0
+    };
+    static const int kList1[] = {
+        WGL_DRAW_TO_WINDOW_ARB, 1,
+        WGL_SUPPORT_OPENGL_ARB, 1,
+        WGL_DOUBLE_BUFFER_ARB, 1,
+        WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
+        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+        WGL_RED_BITS_ARB, 8,
+        WGL_GREEN_BITS_ARB, 8,
+        WGL_BLUE_BITS_ARB, 8,
+        WGL_ALPHA_BITS_ARB, 8,
+        WGL_DEPTH_BITS_ARB, 24,
+        WGL_STENCIL_BITS_ARB, 8,
+        WGL_SAMPLE_BUFFERS_ARB, 0,
+        WGL_SWAP_METHOD_ARB, WGL_SWAP_COPY_ARB,
+        0
+    };
+    static const int kList2[] = {
+        WGL_DRAW_TO_WINDOW_ARB, 1,
+        WGL_SUPPORT_OPENGL_ARB, 1,
+        WGL_DOUBLE_BUFFER_ARB, 1,
+        WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
+        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+        WGL_RED_BITS_ARB, 8,
+        WGL_GREEN_BITS_ARB, 8,
+        WGL_BLUE_BITS_ARB, 8,
+        WGL_ALPHA_BITS_ARB, 8,
+        WGL_DEPTH_BITS_ARB, 24,
+        WGL_STENCIL_BITS_ARB, 8,
+        WGL_SAMPLE_BUFFERS_ARB, 0,
+        0
+    };
+    static const int kList3[] = {
+        WGL_DRAW_TO_WINDOW_ARB, 1,
+        WGL_SUPPORT_OPENGL_ARB, 1,
+        WGL_DOUBLE_BUFFER_ARB, 1,
+        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+        WGL_RED_BITS_ARB, 8,
+        WGL_GREEN_BITS_ARB, 8,
+        WGL_BLUE_BITS_ARB, 8,
+        WGL_DEPTH_BITS_ARB, 24,
+        0
+    };
+    const int* lists[] = { kList0, kList1, kList2, kList3 };
+
+    for (const int* attribs : lists) {
+        int fmts[32]{};
+        UINT n = 0;
+        if (!choose(hdc, attribs, nullptr, 32, fmts, &n) || n == 0)
+            continue;
+        for (UINT i = 0; i < n; ++i) {
+            if (formatIsSdr8(hdc, fmts[i], getAttr))
+                return fmts[i];
+        }
+    }
+    return 0;
+}
+
+static bool setSdrPixelFormat(HDC hdc,
+                              PFNWGLCHOOSEPIXELFORMATARBPROC choose,
+                              PFNWGLGETPIXELFORMATATTRIBIVARBPROC getAttr) {
+    PIXELFORMATDESCRIPTOR pfd;
+    int pf = 0;
+    if (choose)
+        pf = chooseSdrFormatArb(hdc, choose, getAttr);
+    if (pf > 0) {
+        DescribePixelFormat(hdc, pf, sizeof(pfd), &pfd);
+        if (SetPixelFormat(hdc, pf, &pfd))
+            return true;
+    }
+
+    const bool tries[][2] = { {true, true}, {true, false}, {false, false} };
+    for (const auto& t : tries) {
+        fillSdrPfd(pfd, t[0], t[1]);
+        pf = ChoosePixelFormat(hdc, &pfd);
+        if (pf && SetPixelFormat(hdc, pf, &pfd))
+            return true;
+    }
+    return false;
+}
+
 bool createAppWindow(AppWindow& w, const char* title, int clientW, int clientH) {
     gWin = &w;
     enforcePortraitSize(clientW, clientH);
     w.width = clientW;
     w.height = clientH;
+    w.displayChanged = false;
 
     HINSTANCE inst = GetModuleHandleA(nullptr);
 
@@ -188,6 +438,12 @@ bool createAppWindow(AppWindow& w, const char* title, int clientW, int clientH) 
         }
     }
 
+    PFNWGLCHOOSEPIXELFORMATARBPROC choosePf = nullptr;
+    PFNWGLCREATECONTEXTATTRIBSARBPROC createCtx = nullptr;
+    PFNWGLGETPIXELFORMATATTRIBIVARBPROC getAttr = nullptr;
+    bootstrapWglExts(choosePf, createCtx, getAttr);
+    wglCreateContextAttribsARB = createCtx;
+
     DWORD style = kWindowStyle | WS_VISIBLE;
 
     int winW = 0, winH = 0;
@@ -203,6 +459,8 @@ bool createAppWindow(AppWindow& w, const char* title, int clientW, int clientH) 
         return false;
     }
 
+    hdrPrepareWindow(w.hwnd);
+
     if (hIconBig) SendMessageA(w.hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
     if (hIconSm)  SendMessageA(w.hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
 
@@ -211,19 +469,9 @@ bool createAppWindow(AppWindow& w, const char* title, int clientW, int clientH) 
         destroyAppWindow(w);
         return false;
     }
+    hdrPrepareDc(w.hdc);
 
-    PIXELFORMATDESCRIPTOR pfd = {};
-    pfd.nSize = sizeof(pfd);
-    pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfd.cColorBits = 32;
-    pfd.cDepthBits = 24;
-    pfd.cStencilBits = 8;
-    pfd.iLayerType = PFD_MAIN_PLANE;
-
-    int pf = ChoosePixelFormat(w.hdc, &pfd);
-    if (!pf || !SetPixelFormat(w.hdc, pf, &pfd)) {
+    if (!setSdrPixelFormat(w.hdc, choosePf, getAttr)) {
         destroyAppWindow(w);
         return false;
     }
@@ -239,8 +487,9 @@ bool createAppWindow(AppWindow& w, const char* title, int clientW, int clientH) 
         return false;
     }
 
-    wglCreateContextAttribsARB =
-        (PFNWGLCREATECONTEXTATTRIBSARBPROC)wglGetProcAddress("wglCreateContextAttribsARB");
+    if (!wglCreateContextAttribsARB)
+        wglCreateContextAttribsARB =
+            (PFNWGLCREATECONTEXTATTRIBSARBPROC)wglProc("wglCreateContextAttribsARB");
 
     if (wglCreateContextAttribsARB) {
         const int attribs[] = {
@@ -268,6 +517,8 @@ bool createAppWindow(AppWindow& w, const char* title, int clientW, int clientH) 
         destroyAppWindow(w);
         return false;
     }
+
+    applyHdrSafePresent();
 
     ShowWindow(w.hwnd, SW_SHOW);
     UpdateWindow(w.hwnd);
@@ -303,5 +554,6 @@ void pollAppWindow(AppWindow& w) {
 }
 
 void swapAppWindow(AppWindow& w) {
+    glFlush();
     SwapBuffers(w.hdc);
 }

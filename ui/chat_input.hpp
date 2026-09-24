@@ -24,6 +24,7 @@ public:
     void setOnMuteHotkey(MuteHotkeyCallback cb, void* user);
 
     void layout();
+    void syncHdrPresentation();
 
 private:
     static LRESULT CALLBACK parentHook(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
@@ -32,6 +33,7 @@ private:
 
     void sendAndClose();
     bool createPanel();
+    void applyLayeredStyle();
 
     HWND parent_ = nullptr;
     HWND panel_  = nullptr;

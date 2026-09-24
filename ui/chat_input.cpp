@@ -1,4 +1,5 @@
 #include "ui/chat_input.hpp"
+#include "core/hdr_compat.hpp"
 #include <string>
 #include <imm.h>
 #include <shellapi.h>
@@ -34,8 +35,12 @@ bool ChatInput::createPanel() {
         sClassOk = true;
     }
 
+    const bool useLayered = !hdrDisplayActive();
+    DWORD exStyle = WS_EX_TOOLWINDOW;
+    if (useLayered) exStyle |= WS_EX_LAYERED;
+
     panel_ = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+        exStyle,
         L"BrainChoiceChatBar",
         L"",
         WS_POPUP | WS_CLIPCHILDREN,
@@ -58,7 +63,7 @@ bool ChatInput::createPanel() {
     }
     if (!panel_) return false;
 
-    SetLayeredWindowAttributes(panel_, 0, kAlpha, LWA_ALPHA);
+    applyLayeredStyle();
 
     edit_ = CreateWindowExW(
         0, L"EDIT", L"",
@@ -155,6 +160,32 @@ void ChatInput::layout() {
                  SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+void ChatInput::applyLayeredStyle() {
+    if (!panel_) return;
+    const bool wantLayered = !hdrDisplayActive();
+    LONG_PTR ex = GetWindowLongPtrW(panel_, GWL_EXSTYLE);
+    const bool isLayered = (ex & WS_EX_LAYERED) != 0;
+    if (wantLayered == isLayered) {
+        if (wantLayered)
+            SetLayeredWindowAttributes(panel_, 0, kAlpha, LWA_ALPHA);
+        return;
+    }
+    if (wantLayered)
+        ex |= WS_EX_LAYERED;
+    else
+        ex &= ~WS_EX_LAYERED;
+    SetWindowLongPtrW(panel_, GWL_EXSTYLE, ex);
+    if (wantLayered)
+        SetLayeredWindowAttributes(panel_, 0, kAlpha, LWA_ALPHA);
+    SetWindowPos(panel_, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    InvalidateRect(panel_, nullptr, TRUE);
+}
+
+void ChatInput::syncHdrPresentation() {
+    applyLayeredStyle();
+}
+
 void ChatInput::open() {
     if (!inputAllowed_ || !panel_ || !edit_) return;
     open_ = true;
@@ -228,6 +259,11 @@ LRESULT CALLBACK ChatInput::parentHook(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                     self->onMuteHotkey_(self->onMuteHotkeyUser_);
                 return 0;
             }
+        }
+        if (msg == WM_DISPLAYCHANGE) {
+            LRESULT r = CallWindowProcA(prev, hwnd, msg, wp, lp);
+            self->applyLayeredStyle();
+            return r;
         }
         if (msg == WM_SIZE || msg == WM_MOVE || msg == WM_EXITSIZEMOVE) {
             LRESULT r = CallWindowProcA(prev, hwnd, msg, wp, lp);

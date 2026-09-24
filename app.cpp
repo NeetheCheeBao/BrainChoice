@@ -336,12 +336,7 @@ bool App::init(const LaunchSettings& settings) {
     }
 
     updateTitle(0, 0.f);
-
-    if (driverVsync_) {
-        if (wglSwapIntervalEXT) wglSwapIntervalEXT(1);
-    } else {
-        if (wglSwapIntervalEXT) wglSwapIntervalEXT(0);
-    }
+    applyHdrSafePresent();
 
     camera_.setup(Vec3(0.f, 1.55f, 3.2f), Vec3(0.f, 1.35f, -3.5f), 58.f);
     scroll_.setWallSpeed(1.65f);
@@ -486,12 +481,7 @@ void App::render(float timeSec) {
 int App::run() {
     const int capHz = (modeHz_ > 0) ? modeHz_ : 60;
     if (driverVsync_) timeBeginPeriod(1);
-
-    if (wglSwapIntervalEXT) {
-        if (!driverVsync_) wglSwapIntervalEXT(0);
-        else if (capHz <= 60) wglSwapIntervalEXT(0);
-        else wglSwapIntervalEXT(1);
-    }
+    applyHdrSafePresent();
 
     LARGE_INTEGER qpcFreq{}, qpcNow{};
     QueryPerformanceFrequency(&qpcFreq);
@@ -507,7 +497,11 @@ int App::run() {
 
     while (window_.running) {
         pollAppWindow(window_);
-
+        if (window_.displayChanged) {
+            window_.displayChanged = false;
+            applyHdrSafePresent();
+            chatInput_.syncHdrPresentation();
+        }
         if (pendingResolve_) {
             resolvePendingResult(timer_.elapsed());
         }

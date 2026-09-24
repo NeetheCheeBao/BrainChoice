@@ -26,7 +26,7 @@ set "OUT=bin\BrainChoice.exe"
 set "OBJDIR=%TEMP%\BrainChoice_build"
 set "RES=%OBJDIR%\app_res.o"
 
-set "SRCS=main.cpp app.cpp core\window.cpp core\gl_loader.cpp gfx\shader.cpp gfx\mesh.cpp gfx\texture.cpp scene\camera.cpp scene\scroll_controller.cpp scene\striped_scene.cpp scene\center_divider.cpp scene\character_sprite.cpp ui\launcher.cpp ui\chat_input.cpp ui\result_banner.cpp"
+set "SRCS=main.cpp app.cpp core\window.cpp core\hdr_compat.cpp core\gl_loader.cpp gfx\shader.cpp gfx\mesh.cpp gfx\texture.cpp scene\camera.cpp scene\scroll_controller.cpp scene\striped_scene.cpp scene\center_divider.cpp scene\character_sprite.cpp ui\launcher.cpp ui\chat_input.cpp ui\result_banner.cpp"
 
 set /a TOTAL=2
 for %%F in (%SRCS%) do set /a TOTAL+=1
@@ -48,7 +48,7 @@ for %%F in (%SRCS%) do (
   set "name=!name:\=_!"
   set "name=!name:.cpp=.o!"
   call :progress "compile %%F"
-  "%CXX%" -std=c++17 -O2 -Wall -I . -c "%%F" -o "%OBJDIR%\!name!"
+  "%CXX%" -std=c++17 -O2 -Wall -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -I . -c "%%F" -o "%OBJDIR%\!name!"
   if errorlevel 1 goto :fail
   set OBJS=!OBJS! "%OBJDIR%\!name!"
 )
@@ -57,7 +57,7 @@ call :progress "link %OUT%"
 "%CXX%" !OBJS! "%RES%" -o "%OUT%" ^
   -mwindows ^
   -static-libgcc -static-libstdc++ -static ^
-  -lopengl32 -lgdi32 -luser32 -lwinmm -lole32 -luuid -lwindowscodecs -limm32
+  -lopengl32 -lgdi32 -luser32 -ladvapi32 -lwinmm -lole32 -luuid -lwindowscodecs -limm32
 if errorlevel 1 goto :fail
 
 echo.

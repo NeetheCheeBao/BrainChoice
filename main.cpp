@@ -1,5 +1,6 @@
 #include "app.hpp"
 #include "ui/launcher.hpp"
+#include "core/hdr_compat.hpp"
 #include <windows.h>
 
 static LONG WINAPI onCrash(EXCEPTION_POINTERS* ep) {
@@ -12,6 +13,7 @@ static LONG WINAPI onCrash(EXCEPTION_POINTERS* ep) {
 
 int main() {
     SetUnhandledExceptionFilter(onCrash);
+    hdrCompatEarlyInit();
 
     LaunchSettings settings;
     if (!runLauncher(settings)) {

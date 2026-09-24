@@ -20,3 +20,5 @@ IDR_WALK_G_04 RCDATA "assets/alternate/action/G04.png"
 IDR_WALK_G_05 RCDATA "assets/alternate/action/G05.png"
 
 IDR_BGM WAVE "assets/audio/audio.wav"
+
+1 24 "app.manifest"
