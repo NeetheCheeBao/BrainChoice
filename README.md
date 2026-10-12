@@ -8,7 +8,9 @@
 
 ### Download Project
 
-<table><thead><tr><th style="text-align: center;">Method</th><th>Command</th></tr></thead><tbody><tr><td style="text-align: center;"><b>GitHub CLI</b></td><td><pre><code class="language-bash">gh repo clone NeetheCheeBao/BrainChoice</code></pre></td></tr><tr><td style="text-align: center;"><b>Git</b></td><td><pre><code class="language-bash">git clone https://github.com/NeetheCheeBao/BrainChoice.git</code></pre></td></tr></tbody></table>
+<table><thead><tr><th style="text-align: center;">Method</th><th>Command</th></tr></thead><tbody><tr><td style="text-align: center;"><b>GitHub CLI</b></td><td><pre><code class="language-bash">gh repo clone NeetheCheeBao/BrainChoice</code></pre></td></tr>
+
+<tr><td style="text-align: center;"><b>Git</b></td><td><pre><code class="language-bash">git clone https://github.com/NeetheCheeBao/BrainChoice.git</code></pre></td></tr></tbody></table>
 
 ### Build Project
 
